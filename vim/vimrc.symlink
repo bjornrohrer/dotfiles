@@ -190,6 +190,9 @@ inoremap <Tab> <C-n>
 " ctrl + p to shift + tab to go back
 inoremap <S-Tab> <C-p>
 
+autocmd VimEnter * inoremap <Tab> <C-n>
+autocmd VimEnter * inoremap <S-Tab> <C-p>
+
 " this makes more sense
 set splitright
 set splitbelow
