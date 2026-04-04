@@ -1,6 +1,6 @@
 [user]
-	name = Matt Rohrer
-	email = matt@prognostikos.com
+	name = Bjørn Arthur Rohrer
+	email = bar@betternow.org
 	signingkey = C39654B0CD0FEBFA
 [core]
 	excludesfile = ~/.gitignore
@@ -50,7 +50,7 @@
 [mergetool "nvim"]
 	cmd = nvim -d $LOCAL $MERGED $REMOTE
 [github]
-	user = prognostikos
+	user = bjornrohrer
 [diff]
 	tool = nvim
 	noprefix = true
