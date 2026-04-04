@@ -184,15 +184,6 @@ set clipboard=unnamed
 " it's the new standard
 set tabstop=2 shiftwidth=2 softtabstop=2
 
-" ctrl + n to tab
-inoremap <Tab> <C-n>
-
-" ctrl + p to shift + tab to go back
-inoremap <S-Tab> <C-p>
-
-autocmd VimEnter * inoremap <Tab> <C-n>
-autocmd VimEnter * inoremap <S-Tab> <C-p>
-
 " this makes more sense
 set splitright
 set splitbelow
