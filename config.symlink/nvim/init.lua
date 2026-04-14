@@ -985,7 +985,7 @@ require('lazy').setup({
             },
           },
         },
-        -- clangd = {},
+        clangd = {},
         -- gopls = {},
         -- pyright = {},
         -- rust_analyzer = {},
