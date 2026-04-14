@@ -55,6 +55,6 @@ fi
 if command -v nvim > /dev/null 2>&1; then
   if [ ! -d "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy/lazy.nvim" ]; then
     echo "Installing nvim plugins from lockfile"
-    nvim --headless '+Lazy! restore' +qa
+    nvim --headless "+Lazy! restore" +qa
   fi
 fi
