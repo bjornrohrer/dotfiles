@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+source "$HOME/.espressif/tootls/activate_idf_v6.0.sh"
