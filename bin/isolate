@@ -171,9 +171,6 @@ case "$IMAGE" in
   espressif/idf*)
     EXTRA_FLAGS+=(-e IDF_GIT_SAFE_DIR='/project')
     ;;
-  claude-base)
-    EXTRA_FLAGS+=(-v "$HOME/.claude:/tmp/.claude")
-    ;;
 esac
 
 # ─── Default command ─────────────────────────
