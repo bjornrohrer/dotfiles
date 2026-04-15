@@ -87,7 +87,7 @@ detect_image() {
   fi
 
   # Fallback — Ubuntu with common tools
-  echo "ubuntu:24.04"
+  echo "claude-base"
 }
 
 show_rules() {
@@ -123,6 +123,11 @@ fi
 if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
   echo "$USAGE"
   exit 0
+fi
+
+if [[ "${1:-}" == "--claude" ]]; then
+  IMAGE="claude-base"
+  shift
 fi
 
 # If first arg contains a colon or slash, treat as image name
@@ -165,6 +170,9 @@ EXTRA_FLAGS=()
 case "$IMAGE" in
   espressif/idf*)
     EXTRA_FLAGS+=(-e IDF_GIT_SAFE_DIR='/project')
+    ;;
+  claude-base)
+    EXTRA_FLAGS+=(-v "$HOME/.claude:/tmp/.claude")
     ;;
 esac
 
