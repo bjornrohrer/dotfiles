@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─────────────────────────────────────────────
+# isolate — run any project in a Docker container
+# Only mounts $PWD. Nothing else on your Mac is visible.
+# ─────────────────────────────────────────────
+
+USAGE="Usage: isolate [image] [command...]
+  isolate                  Auto-detect environment, open shell
+  isolate bash             Auto-detect environment, run bash
+  isolate python:3.12      Use specific image, open shell
+  isolate -- idf.py build  Auto-detect, run command
+  isolate list             Show detection rules"
+
+# ─── Colors ──────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+DIM='\033[2m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+# ─── Detection rules ────────────────────────
+# Each rule: file_to_check -> image
+# Order matters — first match wins.
+detect_image() {
+  local dir="$1"
+
+  # Project has its own Dockerfile — build and use it
+  if [[ -f "$dir/Dockerfile" ]]; then
+    echo "dockerfile"
+    return
+  fi
+
+  # ESP-IDF
+  if [[ -f "$dir/sdkconfig" ]] || [[ -f "$dir/sdkconfig.defaults" ]] || grep -qs "idf_component" "$dir/CMakeLists.txt" 2>/dev/null; then
+    echo "espressif/idf:v6.0"
+    return
+  fi
+
+  # Rust
+  if [[ -f "$dir/Cargo.toml" ]]; then
+    echo "rust:latest"
+    return
+  fi
+
+  # Go
+  if [[ -f "$dir/go.mod" ]]; then
+    echo "golang:latest"
+    return
+  fi
+
+  # Node / Bun / Deno
+  if [[ -f "$dir/package.json" ]]; then
+    if [[ -f "$dir/bun.lockb" ]] || [[ -f "$dir/bunfig.toml" ]]; then
+      echo "oven/bun:latest"
+    elif [[ -f "$dir/deno.json" ]] || [[ -f "$dir/deno.jsonc" ]]; then
+      echo "denoland/deno:latest"
+    else
+      echo "node:lts"
+    fi
+    return
+  fi
+
+  # Python
+  if [[ -f "$dir/requirements.txt" ]] || [[ -f "$dir/pyproject.toml" ]] || [[ -f "$dir/setup.py" ]] || [[ -f "$dir/Pipfile" ]]; then
+    echo "python:3.12"
+    return
+  fi
+
+  # Ruby
+  if [[ -f "$dir/Gemfile" ]]; then
+    echo "ruby:latest"
+    return
+  fi
+
+  # Java / Kotlin
+  if [[ -f "$dir/pom.xml" ]] || [[ -f "$dir/build.gradle" ]] || [[ -f "$dir/build.gradle.kts" ]]; then
+    echo "eclipse-temurin:21"
+    return
+  fi
+
+  # C/C++ (generic)
+  if [[ -f "$dir/CMakeLists.txt" ]] || [[ -f "$dir/Makefile" ]]; then
+    echo "gcc:latest"
+    return
+  fi
+
+  # Fallback — Ubuntu with common tools
+  echo "ubuntu:24.04"
+}
+
+show_rules() {
+  cat << 'RULES'
+Detection rules (first match wins):
+
+  Dockerfile                          → builds your Dockerfile
+  sdkconfig / idf CMakeLists.txt      → espressif/idf:v6.0
+  Cargo.toml                          → rust:latest
+  go.mod                              → golang:latest
+  package.json + bun.lockb            → oven/bun:latest
+  package.json + deno.json            → denoland/deno:latest
+  package.json                        → node:lts
+  requirements.txt / pyproject.toml   → python:3.12
+  Gemfile                             → ruby:latest
+  pom.xml / build.gradle              → eclipse-temurin:21
+  CMakeLists.txt / Makefile           → gcc:latest
+  (nothing matched)                   → ubuntu:24.04
+
+Override: isolate <image> [command...]
+RULES
+}
+
+# ─── Parse args ──────────────────────────────
+IMAGE=""
+CMD=()
+
+if [[ "${1:-}" == "list" ]]; then
+  show_rules
+  exit 0
+fi
+
+if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+  echo "$USAGE"
+  exit 0
+fi
+
+# If first arg contains a colon or slash, treat as image name
+if [[ "${1:-}" =~ [:/] ]]; then
+  IMAGE="$1"
+  shift
+fi
+
+# Skip -- separator
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+# Remaining args are the command
+CMD=("$@")
+
+# ─── Detect image if not specified ───────────
+if [[ -z "$IMAGE" ]]; then
+  IMAGE=$(detect_image "$PWD")
+fi
+
+# ─── Handle project Dockerfile ───────────────
+if [[ "$IMAGE" == "dockerfile" ]]; then
+  TAG="isolate-$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+  echo -e "${DIM}Building from Dockerfile...${RESET}"
+  docker build -t "$TAG" . >/dev/null 2>&1 || docker build -t "$TAG" .
+  IMAGE="$TAG"
+fi
+
+# ─── USB device passthrough (for ESP-IDF etc) ─
+DEVICE_FLAGS=()
+for dev in /dev/tty.usbserial-* /dev/tty.SLAB_USBtoUART /dev/cu.usbserial-*; do
+  if [[ -e "$dev" ]] 2>/dev/null; then
+    DEVICE_FLAGS+=(--device="$dev")
+  fi
+done
+
+# ─── Extra flags per image ───────────────────
+EXTRA_FLAGS=()
+case "$IMAGE" in
+  espressif/idf*)
+    EXTRA_FLAGS+=(-e IDF_GIT_SAFE_DIR='/project')
+    ;;
+esac
+
+# ─── Default command ─────────────────────────
+if [[ ${#CMD[@]} -eq 0 ]]; then
+  CMD=("bash")
+fi
+
+# ─── Run ─────────────────────────────────────
+echo -e "${GREEN}${BOLD}isolate${RESET} ${DIM}→${RESET} ${BOLD}$IMAGE${RESET}"
+echo -e "${DIM}mounted: $PWD → /project${RESET}"
+echo -e "${DIM}running: ${CMD[*]}${RESET}"
+echo ""
+
+exec docker run --rm -it \
+  -v "$PWD":/project \
+  -w /project \
+  -u "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
+  -e TERM="$TERM" \
+  "${DEVICE_FLAGS[@]+"${DEVICE_FLAGS[@]}"}" \
+  "${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}" \
+  "$IMAGE" \
+  "${CMD[@]}"
