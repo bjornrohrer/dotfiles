@@ -216,7 +216,7 @@ end
 vim.keymap.set('n', '<leader>rr', show_routes, { silent = true })
 
 vim.diagnostic.config({
-  virtual_text = false,
+  virtual_text = true,
   underline = true
 })
 
