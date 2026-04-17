@@ -17,7 +17,7 @@ export WORDCHARS='*?_-.[]~=&;!#$%^(){}<>'
 
 ### Mac / homebrew specific settings
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  export CDPATH=$HOME/c/bn:$HOME/c:$HOME/b:$HOME:$HOME/d
+  export CDPATH=$HOME/c/bn:$HOME/c:$HOME/b:$HOME:$HOME/d:$HOME/Desktop/Uni
 
   if command -v hdiutil > /dev/null && [ ! -d /Volumes/secrets ] && [ -f ~/Documents/secrets.sparseimage ]; then
     hdiutil attach ~/Documents/secrets.sparseimage
