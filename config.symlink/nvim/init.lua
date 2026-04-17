@@ -1185,11 +1185,6 @@ require('lazy').setup({
 
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
-<<<<<<< HEAD
-    branch = 'master',
-||||||| parent of 1f83169 (fix: Pinned specific treesitter commit)
-=======
->>>>>>> 1f83169 (fix: Pinned specific treesitter commit)
     commit = 'cf12346a3414fa1b06af75c79faebe7f76df080a',
     dependencies = {
       'RRethy/nvim-treesitter-endwise'
