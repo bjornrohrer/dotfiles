@@ -276,6 +276,13 @@ vim.api.nvim_create_autocmd('FileType', {
   end
 })
 
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'c', 'cpp' },
+  callback = function()
+    vim.bo.cindent = true
+  end
+})
+
 -- create folder for file if it doesn't exist
 vim.api.nvim_create_augroup('dowhatimean', { clear = true })
 
