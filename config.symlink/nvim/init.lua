@@ -280,6 +280,7 @@ vim.api.nvim_create_autocmd('FileType', {
   pattern = { 'c', 'cpp' },
   callback = function()
     vim.bo.cindent = true
+    vim.bo.smartindent = false
   end
 })
 
@@ -1298,7 +1299,7 @@ require('lazy').setup({
         --  the list of additional_vim_regex_highlighting and disabled languages for indent.
         additional_vim_regex_highlighting = { 'ruby' },
       },
-      indent = { enable = true, disable = { 'ruby' } },
+      indent = { enable = true, disable = { 'ruby', 'c', 'cpp' } },
       endwise = {
         enable = true
       }
