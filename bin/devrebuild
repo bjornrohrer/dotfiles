@@ -156,7 +156,7 @@ fi
 devcontainer up \
   --workspace-folder "$MAIN_REPO" \
   --remove-existing-container \
-  --dotfiles-repository https://github.com/prognostikos/dotfiles \
+  --dotfiles-repository https://github.com/bjornrohrer/dotfiles \
   --dotfiles-install-command script/setup \
   --dotfiles-target-path "/home/$DEVCONTAINER_USER/.dotfiles" \
   "${MOUNT_ARGS[@]}" \
