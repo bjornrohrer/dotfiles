@@ -290,6 +290,35 @@ vim.api.nvim_create_autocmd('BufWritePre', {
   end
 })
 
+-- Auto-reconfigure CMake on save (CLion-style): regenerates build/compile_commands.json
+-- and symlinks it into the project root so clangd picks up include paths/flags.
+vim.api.nvim_create_autocmd('BufWritePost', {
+  group = vim.api.nvim_create_augroup('cmake_autoconfig', { clear = true }),
+  pattern = 'CMakeLists.txt',
+  callback = function(args)
+    local root = vim.fn.fnamemodify(args.file, ':p:h')
+    local build = root .. '/build'
+    vim.system(
+      { 'cmake', '-S', root, '-B', build, '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' },
+      { text = true },
+      function(out)
+        vim.schedule(function()
+          if out.code ~= 0 then
+            vim.notify('cmake configure failed:\n' .. (out.stderr or ''), vim.log.levels.ERROR)
+            return
+          end
+          -- Symlink compile_commands.json into the project root if missing
+          local link = root .. '/compile_commands.json'
+          if vim.loop.fs_lstat(link) == nil then
+            vim.loop.fs_symlink('build/compile_commands.json', link)
+          end
+          vim.notify('cmake reconfigured: ' .. root, vim.log.levels.INFO)
+        end)
+      end
+    )
+  end,
+})
+
 -- dts inserts the current timestamp in insert mode
 vim.cmd [[iabbrev <expr> dts strftime('%Y-%m-%d %H:%M:%S %Z')]]
 
