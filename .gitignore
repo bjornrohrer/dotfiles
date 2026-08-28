@@ -14,3 +14,8 @@ config.symlink/cb/certs
 config.symlink/karabiner/automatic_backups
 tmp/*
 docker/claude-base/Dockerfile
+aws.symlink/cli/cache/*
+aws.symlink/login/cache/*
+aws.symlink/sso/cache/*
+fzf/completion.zsh
+fzf/key-bindings.zsh

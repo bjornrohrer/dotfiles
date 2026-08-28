@@ -5,9 +5,9 @@ else
   alias ls="ls -F"
 fi
 
-alias vj="${EDITOR:-vim} ~/d/journal.md.pgp"
-alias vw="${EDITOR:-vim} ~/d/wiki/index.md"
-alias wj="${EDITOR:-vim} -c :WikiJournal"
+alias vj='${EDITOR:-vim} ~/d/journal.md.pgp'
+alias vw='${EDITOR:-vim} ~/d/wiki/index.md'
+alias wj='${EDITOR:-vim} -c :WikiJournal'
 
 alias ip="dig +short myip.opendns.com @resolver1.opendns.com"
 alias n=nvim
@@ -25,9 +25,28 @@ ag() {
 }
 
 yolo() {
-  if [ -z "$RUNNING_IN_DEVCONTAINER" ]; then
+  if [ -z "${RUNNING_IN_DEVCONTAINER:-}" ]; then
     echo "Nope. Run me in a devcontainer." >&2
-  else
-    claude --dangerously-skip-permissions
+    return 1
   fi
+
+  if [ "$#" -gt 1 ]; then
+    echo "Usage: yolo [codex|claude]" >&2
+    return 1
+  fi
+
+  case "${1:-codex}" in
+    codex)
+      local codex_profile="${PWD:t}"
+      codex_profile="${codex_profile//[^A-Za-z0-9._-]/-}"
+      codex --profile "$codex_profile" --yolo
+      ;;
+    claude)
+      claude --dangerously-skip-permissions
+      ;;
+    *)
+      echo "Usage: yolo [codex|claude]" >&2
+      return 1
+      ;;
+  esac
 }

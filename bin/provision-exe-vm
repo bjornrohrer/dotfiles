@@ -1,0 +1,143 @@
+#!/bin/bash
+
+# Provision a new exe.dev VM and customize it with these dotfiles.
+# See https://exe.dev/docs/customization#setup-scripts
+
+set -euo pipefail
+
+# 1Password reference for the service account token that goes to the VM.
+# Override with the environment variable if you use a different item.
+export OP_ACCOUNT=${OP_ACCOUNT:-"betternow.1password.com"}
+OP_TOKEN_REF=${OP_TOKEN_REF:-"op://Employee/ef6cnygin7ob2nhdu24skimxma/credential"}
+
+usage() {
+  cat <<USAGE
+Usage: provision-exe-vm [vm_name] [exe.dev new options...]
+
+Write the default exe.dev setup script, then create a new VM.
+The setup script:
+  1. Clones the dotfiles repository to ~/.dotfiles
+  2. Runs bin/provision-ubuntu-vm from the clone (packages and tools)
+  3. Changes the login shell to zsh
+  4. Runs the dotfiles setup script
+  5. Writes ~/.localrc with exe-specific env vars
+  6. Notifies the exe.dev app that the VM is ready
+
+After the VM is created, this script reads the 1Password service
+account token (OP_TOKEN_REF, default op://Employee/.../credential)
+and writes it to /etc/op/token on the VM (root, 600). devrebuild
+uses that token to generate .env files from 1Password environments.
+
+The default applies to all new VMs. To remove it:
+  ssh exe.dev defaults delete dev.exe new.setup-script
+
+If vm_name is not given, exe.dev picks a name. Extra arguments
+pass through to "ssh exe.dev new", for example:
+  provision-exe-vm mybox --tag experiments
+USAGE
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+# The first argument is the VM name unless it looks like a flag;
+# all remaining arguments pass through to "ssh exe.dev new".
+vm_name=""
+if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ]; then
+  vm_name="$1"
+  shift
+fi
+
+# The setup script runs once, at first boot, as the login user on the VM.
+# Its output goes to ~/provision.log on the VM for troubleshooting.
+# The heavy lifting lives in bin/provision-ubuntu-vm in the dotfiles, so
+# the VM runs whatever is on GitHub master at first boot - push before
+# provisioning.
+setup_script() {
+  cat <<'SETUP'
+#!/bin/bash
+set -euo pipefail
+
+exec > "$HOME/provision.log" 2>&1
+
+git clone --recursive https://github.com/prognostikos/dotfiles.git "$HOME/.dotfiles"
+
+"$HOME/.dotfiles/bin/provision-ubuntu-vm"
+
+sudo chsh -s "$(command -v zsh)" "$(id -un)"
+
+cd "$HOME/.dotfiles"
+./script/setup
+
+# env vars for exe VMs only; sourced by both zshrc and bashrc
+# contents must be compatible with both zsh and macOS bash
+cat > "$HOME/.localrc" <<'LOCALRC'
+export GH_HOST=github.int.exe.xyz
+export TZ=Europe/Copenhagen
+LOCALRC
+
+# mirror the devcontainer setup for host/container worktree path compat
+sudo ln -s /home/exedev /workspaces
+
+# ping the exe.dev app; must not fail provisioning
+"$HOME/.dotfiles/bin/notify-from-exe" "VM provisioned: $(hostname)" || true
+SETUP
+}
+
+# Only push the setup script to exe.dev when its content changed since
+# the last run; the ssh round-trip is slow and the default is sticky.
+# Delete the cache file to force a write.
+cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/provision-exe-vm.hash"
+current_hash=$(setup_script | git hash-object --stdin)
+
+if [ ! -f "$cache_file" ] || [ "$(cat "$cache_file")" != "$current_hash" ]; then
+  setup_script | ssh exe.dev defaults write dev.exe new.setup-script
+  mkdir -p "$(dirname "$cache_file")"
+  printf '%s\n' "$current_hash" > "$cache_file"
+else
+  echo "Setup script unchanged; skipping defaults write"
+fi
+
+new_args=(new --json --disk=32)
+if [ -n "$vm_name" ]; then
+  new_args+=(--name "$vm_name")
+fi
+new_args+=("$@")
+
+# shellcheck disable=SC2029 # client-side expansion is intended
+vm_json=$(ssh exe.dev "${new_args[@]}")
+printf '%s\n' "$vm_json"
+
+ssh_dest=$(printf '%s\n' "$vm_json" | jq -r '.ssh_dest // empty')
+if [ -z "$ssh_dest" ]; then
+  echo "error: no ssh_dest in the exe.dev response; write the token manually:" >&2
+  echo "  op read \"$OP_TOKEN_REF\" | ssh <vm> 'sudo install -d -m 700 /etc/op && umask 077 && sudo tee /etc/op/token > /dev/null && sudo chmod 600 /etc/op/token'" >&2
+  exit 1
+fi
+
+# Give the VM the 1Password service account token so that devrebuild can
+# generate .env files from 1Password environments on the VM.
+op_token=$(op read "$OP_TOKEN_REF")
+write_marker="provision-exe-vm:token-written"
+
+for attempt in 1 2 3 4 5; do
+  write_status=0
+  write_output=$(printf '%s' "$op_token" | ssh -o StrictHostKeyChecking=accept-new "$ssh_dest" \
+    'sudo install -d -m 700 /etc/op && umask 077 && sudo tee /etc/op/token > /dev/null && sudo chmod 600 /etc/op/token && sudo test -s /etc/op/token && printf "%s\n" "provision-exe-vm:token-written"') || write_status=$?
+
+  # A new exe.dev hostname can briefly route commands to the account shell.
+  # That shell reports sudo failure but exits successfully, so also require a
+  # marker printed after the VM has written and checked the token file.
+  if [ "$write_status" -eq 0 ] && [ "$write_output" = "$write_marker" ]; then
+    echo "Wrote the 1Password token to $ssh_dest:/etc/op/token"
+    break
+  fi
+  if [ "$attempt" -eq 5 ]; then
+    echo "error: could not write the token to $ssh_dest after 5 attempts" >&2
+    exit 1
+  fi
+  echo "ssh to $ssh_dest failed; retry in 3 seconds..." >&2
+  sleep 3
+done
