@@ -6,6 +6,10 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/.worktree-layout"
 
+# shellcheck source=bin/.devcontainer-config
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/.devcontainer-config"
+
 usage() {
   echo "Usage: devrebuild [--nuke] [--no-cache]"
   echo ""
@@ -13,22 +17,15 @@ usage() {
   echo ""
   echo "Options:"
   echo "  --nuke       Completely remove the devcontainer including volumes before rebuilding"
-  echo "  --no-cache   Build the image without using cache (pulls fresh base image)"
+  echo "  --no-cache   Build without cached layers. For an image-based configuration,"
+  echo "               this does NOT pull a new image. Run docker pull <image> first."
+  echo "               Dockerfile builds can also pull base images, depending on the CLI build path."
   exit 1
 }
 
-# Get remoteUser from devcontainer.json
+# Get remoteUser from the selected dev container configuration.
 get_remote_user() {
-  local devcontainer_json=""
-  if [ -f "$MAIN_REPO/.devcontainer/devcontainer.json" ]; then
-    devcontainer_json="$MAIN_REPO/.devcontainer/devcontainer.json"
-  elif [ -f "$MAIN_REPO/.devcontainer.json" ]; then
-    devcontainer_json="$MAIN_REPO/.devcontainer.json"
-  fi
-
-  if [ -n "$devcontainer_json" ]; then
-    jq -r '.remoteUser // empty' "$devcontainer_json"
-  fi
+  jq -r '.remoteUser // empty' "$DEVCONTAINER_CONFIG_FILE"
 }
 
 NUKE=false
@@ -55,19 +52,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve the main checkout even when invoked from a linked worktree whose Git
-# pointers currently refer to the other side of the host/container boundary.
-if git rev-parse --git-common-dir &>/dev/null; then
-  MAIN_REPO="$(wt_main_worktree)"
-elif wt_find_broken_worktree "$PWD"; then
-  MAIN_REPO="$WT_BROKEN_MAIN_WORKTREE"
-else
-  MAIN_REPO="$(pwd -P)"
-fi
+wt_resolve_current_worktree
+MAIN_REPO="$WT_MAIN_WORKTREE"
 
 PROJECT_DIR="$(basename "$MAIN_REPO")"
 WORKTREES_DIR="$(wt_worktrees_dir "$MAIN_REPO")"
 SIBLING_WORKTREES_DIR="$(dirname "$MAIN_REPO")/${PROJECT_DIR}-worktrees"
+
+devcontainer_resolve_workspace "$MAIN_REPO"
 
 # Priority: DEVCONTAINER_USER env var > devcontainer.json remoteUser > default
 DEVCONTAINER_USER=${DEVCONTAINER_USER:-$(get_remote_user)}
@@ -115,7 +107,9 @@ if [ "$NUKE" = true ]; then
 fi
 
 # Build mount arguments
+mkdir -p "$HOME/.agents"
 MOUNT_ARGS=(
+  --mount "type=bind,source=${HOME}/.agents,target=/home/${DEVCONTAINER_USER}/.agents"
   --mount "type=bind,source=${HOME}/.claude,target=/home/${DEVCONTAINER_USER}/.claude"
 )
 
@@ -139,14 +133,16 @@ if [ "$NO_CACHE" = true ]; then
 fi
 
 # Compose files reference ../.env, which resolves to the repository root.
-# When that file is missing on a host that provision-exe-vm gave a
-# 1Password service account token (/etc/op/token, root-only), generate it
+# When that file is missing and a 1Password service account token is available
+# in the environment or /etc/op/token (root-only), generate it
 # from a 1Password environment for the duration of this script. The trap
 # removes it again, so the secrets never stay on disk.
 ENV_FILE="$MAIN_REPO/.env"
-if [ ! -f "$ENV_FILE" ] && [ -d /etc/op ] && sudo test -f /etc/op/token; then
+if [ ! -f "$ENV_FILE" ] && { [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || { [ -d /etc/op ] && sudo test -f /etc/op/token; }; }; then
   echo "Generating $ENV_FILE from 1Password (removed on exit)..."
-  OP_SERVICE_ACCOUNT_TOKEN=$(sudo cat /etc/op/token)
+  if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+    OP_SERVICE_ACCOUNT_TOKEN=$(sudo cat /etc/op/token)
+  fi
   export OP_SERVICE_ACCOUNT_TOKEN
   trap 'rm -f "$ENV_FILE"' EXIT
   (umask 077; op environment read "${OP_ENVIRONMENT_ID:-os2pfekn55ky2d6uptjrgvvgm4}" > "$ENV_FILE")
@@ -154,7 +150,7 @@ if [ ! -f "$ENV_FILE" ] && [ -d /etc/op ] && sudo test -f /etc/op/token; then
 fi
 
 devcontainer up \
-  --workspace-folder "$MAIN_REPO" \
+  "${DEVCONTAINER_WORKSPACE_ARGS[@]}" \
   --remove-existing-container \
   --dotfiles-repository https://github.com/bjornrohrer/dotfiles \
   --dotfiles-install-command script/setup \

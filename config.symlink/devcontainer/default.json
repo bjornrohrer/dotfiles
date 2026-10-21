@@ -1,0 +1,10 @@
+{
+  "name": "${localWorkspaceFolderBaseName}",
+  "image": "ghcr.io/betternoworg/devcontainer-base",
+  "remoteUser": "dev",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind",
+  "remoteEnv": {
+    "PATH": "/home/${containerEnv:USER}/.local/bin:/home/${containerEnv:USER}/.bun/bin:${containerEnv:PATH}"
+  }
+}

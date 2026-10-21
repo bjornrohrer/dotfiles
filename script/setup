@@ -36,6 +36,11 @@ is_mount_point() {
 link_entry() {
   local source="$1" dest="$2" child
 
+  if [ "$dest" = "$DEST_ROOT/.claude/skills" ] && [ -d "$source" ]; then
+    install_claude_skills "$source" "$dest"
+    return
+  fi
+
   if [ -L "$dest" ]; then
     if [ "$dest" -ef "$source" ]; then
       return
@@ -60,7 +65,36 @@ link_entry() {
   ln -svf "$source" "$dest"
 }
 
-find "$DOTFILES_ROOT" -maxdepth 2 -name '*.symlink' -print0 | while IFS= read -r -d '' source
+# Keep this directory real: it is shared with containers whose home paths
+# differ from the host. Copy Claude-only skills without replacing local edits.
+install_claude_skills() {
+  local source="$1" dest="$2" child target staging
+
+  if [ -L "$dest" ]; then
+    if [ ! "$dest" -ef "$source" ]; then
+      echo "Cannot install Claude skills: $dest is an unmanaged symlink." >&2
+      return 1
+    fi
+    staging="$(mktemp -d "${dest}.XXXXXX")"
+    if ! cp -R "$dest/." "$staging/"; then
+      rm -r "$staging"
+      return 1
+    fi
+    rm "$dest"
+    mv "$staging" "$dest"
+  fi
+
+  mkdir -p "$dest"
+  for child in "$source"/*; do
+    target="$dest/$(basename "$child")"
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+      cp -R "$child" "$target"
+    fi
+  done
+}
+
+find "$DOTFILES_ROOT" -maxdepth 2 -path "$DOTFILES_ROOT/test" -prune -o \
+  -name '*.symlink' -print0 | while IFS= read -r -d '' source
 do
   dest="${DEST_ROOT}/.$(basename "${source%.*}")"
 
@@ -69,19 +103,64 @@ do
     continue
   fi
 
+  # Relative shared-skill links must resolve from the home directory on
+  # both the host and the container, even when their home paths differ.
+  if [ "$(basename "${source%.*}")" = "claude" ]; then
+    if [ -L "$dest" ] && [ "$dest" -ef "$source" ]; then
+      rm "$dest"
+    fi
+    if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+      mkdir -p "$dest"
+    fi
+  fi
+
   link_entry "$source" "$dest"
+done
+
+if [ -L "$DEST_ROOT/.claude/skills" ] && [ ! -d "$DEST_ROOT/.claude/skills" ]; then
+  echo "Cannot access $DEST_ROOT/.claude/skills. Run the updated script/setup on the host before rebuilding the container." >&2
+  exit 1
+fi
+mkdir -p "$DEST_ROOT/.claude/skills"
+for skill in "$DEST_ROOT/.agents/skills"/*; do
+  [ -f "$skill/SKILL.md" ] || continue
+  skill_name="$(basename "$skill")"
+  skill_link="$DEST_ROOT/.claude/skills/$skill_name"
+  skill_target="../../.agents/skills/$skill_name"
+  if [ -L "$skill_link" ] && [ "$(readlink "$skill_link")" = "$skill_target" ]; then
+    continue
+  fi
+  if [ -e "$skill_link" ] || [ -L "$skill_link" ]; then
+    echo "Skipping shared skill $skill_name (Claude skill already exists)"
+    continue
+  fi
+  ln -sv "$skill_target" "$skill_link"
 done
 
 if command -v fzf > /dev/null 2>&1; then
   if ! fzf --zsh > /dev/null 2>&1; then
-    if [ ! -f "$DOTFILES_ROOT/fzf/key-bindings.zsh" ] || [ ! -f "$DOTFILES_ROOT/fzf/completion.zsh" ]; then
+    fzf_package_dir="/usr/share/doc/fzf/examples"
+
+    if [ ! -r "$fzf_package_dir/key-bindings.zsh" ] || [ ! -r "$fzf_package_dir/completion.zsh" ]; then
       fzf_version=$(fzf --version | cut -d " " -f 1)
-      url_prefix="https://raw.githubusercontent.com/junegunn/fzf/refs/tags/$fzf_version/shell/"
+      fzf_cache_dir="${XDG_CACHE_HOME:-$DEST_ROOT/.cache}/dotfiles/fzf/$fzf_version"
+      url_prefix="https://raw.githubusercontent.com/junegunn/fzf/refs/tags/$fzf_version/shell"
 
-      echo "Installing zsh files for fzf version $fzf_version"
+      mkdir -p "$fzf_cache_dir"
+      echo "Installing zsh files for fzf version $fzf_version into $fzf_cache_dir"
 
-      curl -fsSL "$url_prefix/key-bindings.zsh" -o "$DOTFILES_ROOT/fzf/key-bindings.zsh"
-      curl -fsSL "$url_prefix/completion.zsh" -o "$DOTFILES_ROOT/fzf/completion.zsh"
+      for fzf_shell_file in key-bindings.zsh completion.zsh; do
+        if [ ! -s "$fzf_cache_dir/$fzf_shell_file" ]; then
+          fzf_download_ok=false
+          curl -fsSL "$url_prefix/$fzf_shell_file" -o "$fzf_cache_dir/$fzf_shell_file.tmp" && fzf_download_ok=true || true
+
+          if [ "$fzf_download_ok" = true ] && [ -s "$fzf_cache_dir/$fzf_shell_file.tmp" ]; then
+            mv "$fzf_cache_dir/$fzf_shell_file.tmp" "$fzf_cache_dir/$fzf_shell_file"
+          else
+            rm -f "$fzf_cache_dir/$fzf_shell_file.tmp"
+          fi
+        fi
+      done
     fi
   fi
 fi
